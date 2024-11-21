@@ -1,5 +1,5 @@
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 import json
 import base64
@@ -75,25 +75,27 @@ class FitbitNotionTracker:
             print(f"❌ Error refreshing token: {str(e)}")
             raise
 
-    def get_daily_activity_minutes(self, date=None):
-        """Fetch activity minutes from Fitbit"""
-        print("\n=== Fetching Fitbit Activity Data ===")
-        if date is None:
-            date = datetime.now().strftime("%Y-%m-%d")
-        print(f"Fetching data for date: {date}")
-            
-        endpoint = f"activities/date/{date}.json"
-        url = self.fitbit_base_url + endpoint
+    def _make_fitbit_request(self, endpoint, method='GET'):
+        """
+        Generic method to make Fitbit API requests with token refresh capability
         
+        :param endpoint: API endpoint to request
+        :param method: HTTP method (default is GET)
+        :return: JSON response or None
+        """
+        url = self.fitbit_base_url + endpoint
         headers = {
             "Authorization": f"Bearer {self.fitbit_access_token}",
             "Accept": "application/json"
         }
         
         try:
-            print("Sending request to Fitbit API...")
-            response = requests.get(url, headers=headers)
-            print(f"Response status code: {response.status_code}")
+            print(f"Sending {method} request to Fitbit API: {endpoint}")
+            
+            if method == 'GET':
+                response = requests.get(url, headers=headers)
+            else:
+                raise ValueError(f"Unsupported HTTP method: {method}")
             
             # If token expired, refresh and retry
             if response.status_code == 401:
@@ -101,16 +103,43 @@ class FitbitNotionTracker:
                 self.fitbit_access_token = self.refresh_fitbit_token()
                 headers["Authorization"] = f"Bearer {self.fitbit_access_token}"
                 print("Retrying request with new token...")
-                response = requests.get(url, headers=headers)
-                print(f"New response status code: {response.status_code}")
+                
+                if method == 'GET':
+                    response = requests.get(url, headers=headers)
             
             if response.status_code != 200:
                 print(f"❌ Error response from Fitbit API: {response.text}")
-            response.raise_for_status()
+                response.raise_for_status()
             
-            data = response.json()
-            print("Successfully received data from Fitbit")
+            return response.json()
+        
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Error in Fitbit API request: {str(e)}")
+            return None
+
+    def get_comprehensive_health_data(self, date):
+        """Retrieve comprehensive health data for a specific date"""
+        print(f"\n=== Collecting Comprehensive Health Data for {date} ===")
+        
+        # Collect all available health metrics
+        health_data = {
+            'date': date,
+            'activity': self.get_daily_activity_minutes(date),
+            'sleep': self.get_sleep_data(date),
+            'weight': self.get_weight_data(date),
+            'heart_rate': self.get_heart_rate_data(date)
+        }
+        
+        return health_data
+
+    def get_daily_activity_minutes(self, date):
+        """Fetch activity minutes from Fitbit"""
+        print(f"\n=== Fetching Fitbit Activity Data for {date} ===")
             
+        endpoint = f"activities/date/{date}.json"
+        data = self._make_fitbit_request(endpoint)
+        
+        if data:
             activity_data = {
                 'date': date,
                 'sedentary_minutes': data['summary']['sedentaryMinutes'],
@@ -124,47 +153,207 @@ class FitbitNotionTracker:
                 )
             }
             
-            print("\nActivity data summary:")
-            for key, value in activity_data.items():
-                print(f"  {key}: {value}")
-            
             return activity_data
-            
-        except requests.exceptions.RequestException as e:
-            print(f"❌ Error fetching Fitbit data: {str(e)}")
-            print(f"Request details: URL={url}")
-            return None
+        return None
 
-    # [Previous Notion methods remain the same...]
+    def get_sleep_data(self, date):
+        """Fetch sleep data from Fitbit"""
+        print(f"\n=== Fetching Fitbit Sleep Data for {date} ===")
+        
+        endpoint = f"sleep/date/{date}.json"
+        data = self._make_fitbit_request(endpoint)
+        
+        if data and data.get('summary'):
+            sleep_data = {
+                'date': date,
+                'total_minutes_asleep': data['summary'].get('totalMinutesAsleep', 0),
+                'total_sleep_records': data['summary'].get('totalSleepRecords', 0),
+                'total_time_in_bed': data['summary'].get('totalTimeInBed', 0)
+            }
+            
+            return sleep_data
+        return None
+
+    def get_weight_data(self, date):
+        """Fetch weight data from Fitbit"""
+        print(f"\n=== Fetching Fitbit Weight Data for {date} ===")
+        
+        endpoint = f"body/log/weight/date/{date}.json"
+        data = self._make_fitbit_request(endpoint)
+        
+        if data and data.get('weight'):
+            weight_entry = data['weight'][0] if data['weight'] else None
+            
+            if weight_entry:
+                weight_data = {
+                    'date': date,
+                    'weight': weight_entry.get('weight', 0),
+                    'bmi': weight_entry.get('bmi', 0),
+                    'log_id': weight_entry.get('logId', '')
+                }
+                
+                return weight_data
+        return None
+
+    def get_heart_rate_data(self, date):
+        """Fetch heart rate data from Fitbit"""
+        print(f"\n=== Fetching Fitbit Heart Rate Data for {date} ===")
+        
+        endpoint = f"heart/date/{date}.json"
+        data = self._make_fitbit_request(endpoint)
+        
+        if data and data.get('activities-heart'):
+            heart_rate_entry = data['activities-heart'][0]
+            
+            heart_rate_data = {
+                'date': date,
+                'resting_heart_rate': heart_rate_entry.get('value', {}).get('restingHeartRate', 0)
+            }
+            
+            return heart_rate_data
+        return None
+
+    def check_existing_entries(self, dates):
+        """
+        Check if entries for specific dates already exist in Notion
+        
+        :param dates: List of dates to check
+        :return: List of dates that do not have existing entries
+        """
+        print("\n=== Checking for Existing Notion Entries ===")
+        
+        # Notion API request headers
+        headers = {
+            "Authorization": f"Bearer {self.notion_token}",
+            "Content-Type": "application/json",
+            "Notion-Version": "2022-06-28"
+        }
+        
+        # Filter existing entries
+        filter_body = {
+            "filter": {
+                "or": [
+                    {"property": "Date", "date": {"equals": date}} for date in dates
+                ]
+            }
+        }
+        
+        url = f"{self.notion_base_url}databases/{self.notion_database_id}/query"
+        
+        try:
+            response = requests.post(url, headers=headers, json=filter_body)
+            response.raise_for_status()
+            
+            existing_entries = response.json()['results']
+            
+            # Extract dates of existing entries
+            existing_dates = [
+                entry['properties']['Date']['date']['start'] 
+                for entry in existing_entries 
+                if entry['properties']['Date']['date']
+            ]
+            
+            # Find dates without existing entries
+            new_dates = [date for date in dates if date not in existing_dates]
+            
+            print(f"Existing entries found for: {existing_dates}")
+            print(f"New dates to process: {new_dates}")
+            
+            return new_dates
+        
+        except Exception as e:
+            print(f"❌ Error checking existing Notion entries: {str(e)}")
+            return dates  # If check fails, process all dates
+
+    def post_to_notion(self, health_data):
+        """
+        Post health data to Notion database
+        
+        :param health_data: Dictionary of health metrics
+        """
+        print("\n=== Posting Data to Notion ===")
+        
+        # Notion API request headers
+        headers = {
+            "Authorization": f"Bearer {self.notion_token}",
+            "Content-Type": "application/json",
+            "Notion-Version": "2022-06-28"
+        }
+        
+        # Construct Notion page properties
+        properties = {
+            "Date": {
+                "date": {"start": health_data['date']}
+            }
+        }
+        
+        # Add health metrics as properties
+        for category, data in health_data.items():
+            if category != 'date' and data:
+                for key, value in data.items():
+                    if key != 'date':
+                        properties[key.replace('_', ' ').title()] = {
+                            "number": value
+                        }
+        
+        # Request body
+        body = {
+            "parent": {"database_id": self.notion_database_id},
+            "properties": properties
+        }
+        
+        url = f"{self.notion_base_url}pages"
+        
+        try:
+            response = requests.post(url, headers=headers, json=body)
+            response.raise_for_status()
+            print(f"✓ Successfully posted data for {health_data['date']} to Notion")
+        except Exception as e:
+            print(f"❌ Error posting to Notion: {str(e)}")
+            print(f"Request body: {json.dumps(body, indent=2)}")
+            raise
 
 def main():
-    print("\n=== Starting Fitbit to Notion Sync ===")
+    print("\n=== Starting Comprehensive Fitbit Health Data Collection ===")
     print(f"Current time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
     try:
         tracker = FitbitNotionTracker()
-        today = datetime.now().strftime("%Y-%m-%d")
-        print(f"\nProcessing data for date: {today}")
         
-        print("\nStep 1: Checking for existing entry")
-        if tracker.check_existing_entry(today):
-            print(f"⚠️ Entry for {today} already exists in Notion")
-            return
+        # Generate dates for last 7 days
+        today = datetime.now()
+        date_range = [
+            (today - timedelta(days=i)).strftime("%Y-%m-%d") 
+            for i in range(7)
+        ]
         
-        print("\nStep 2: Fetching Fitbit data")
-        activity_data = tracker.get_daily_activity_minutes()
+        # Check which dates don't have existing entries
+        dates_to_process = tracker.check_existing_entries(date_range)
         
-        if activity_data:
-            print("\nStep 3: Posting to Notion")
-            tracker.post_to_notion(activity_data)
+        # Process and post data for new dates
+        for date in dates_to_process:
+            print(f"\nProcessing comprehensive data for date: {date}")
             
-            print("\n=== Final Activity Summary ===")
-            for key, value in activity_data.items():
-                if key != 'date':
-                    print(f"{key.replace('_', ' ').title()}: {value}")
-        else:
-            print("❌ No activity data received from Fitbit")
+            # Collect comprehensive health data
+            comprehensive_data = tracker.get_comprehensive_health_data(date)
             
+            # Post to Notion
+            tracker.post_to_notion(comprehensive_data)
+            
+            # Print out the collected data
+            print("\n=== Comprehensive Health Data Summary ===")
+            for category, data in comprehensive_data.items():
+                if category != 'date':
+                    print(f"\n{category.replace('_', ' ').title()}:")
+                    if data:
+                        for key, value in data.items():
+                            print(f"  {key.replace('_', ' ').title()}: {value}")
+                    else:
+                        print("  No data available")
+        
+        if not dates_to_process:
+            print("\n✓ No new dates to process. All entries up to date.")
+        
     except Exception as e:
         print(f"\n❌ Error in main execution: {str(e)}")
         raise e
