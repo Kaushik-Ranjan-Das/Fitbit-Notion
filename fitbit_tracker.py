@@ -379,5 +379,4 @@ def main():
                     else:
                         print("  No data available")
         
-        if not dates_to_process:
-            print("\n✓ No new dates to process. All entries up to date.")
+        if not dates_to_process
