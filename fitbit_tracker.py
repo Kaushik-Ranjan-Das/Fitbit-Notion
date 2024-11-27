@@ -379,4 +379,11 @@ def main():
                     else:
                         print("  No data available")
         
-        if not dates_to_process
+        if not dates_to_process:
+            print("\n✓ No new dates to process. All entries up to date.")
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+
+if __name__ == "__main__":
+    main()
