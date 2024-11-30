@@ -241,6 +241,11 @@ class FitbitNotionTracker:
                 }
                 return weight_data
         return None
+'''
+Commenting out the heart section on 11/30/24 because of the below error - The next three lines
+Sending GET request to Fitbit API: heart/date/2024-11-29.json
+❌ Error response from Fitbit API: {"errors":[{"errorType":"not_found","fieldName":"n/a","message":"The API you are requesting could not be found."}],"success":false}
+❌ Error in Fitbit API request: 404 Client Error: Not Found for url: https://api.fitbit.com/1/user/-/heart/date/2024-11-29.json
 
     def get_heart_rate_data(self, date):
         """Fetch heart rate data from Fitbit"""
@@ -258,7 +263,7 @@ class FitbitNotionTracker:
             }
             return heart_rate_data
         return None
-
+'''
     def check_existing_entries(self, dates):
         """Check if entries for specific dates already exist in Notion"""
         print("\n=== Checking for Existing Notion Entries ===")
