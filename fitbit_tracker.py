@@ -16,8 +16,7 @@ class FitbitNotionTracker:
             self.notion_token = os.environ['NOTION_TOKEN']
             self.notion_database_id = os.environ['NOTION_DATABASE_ID']
             
-            # Validate required credentials
-            self._validate_credentials()
+
             
             # Get initial access token using refresh token
             self.fitbit_access_token = self.refresh_fitbit_token()
@@ -25,7 +24,8 @@ class FitbitNotionTracker:
             # API endpoints
             self.fitbit_base_url = "https://api.fitbit.com/1/user/-/"
             self.notion_base_url = "https://api.notion.com/v1/"
-            
+                        # Validate required credentials
+            self._validate_credentials()
             print("✓ Initialization complete")
             
         except KeyError as e:
